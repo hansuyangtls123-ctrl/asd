@@ -1,0 +1,266 @@
+-- Delta Optimized Light Version
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local lockedTarget = nil
+local isLocked = false
+local silentAimActive = false
+local espList = {}
+local tpDistance = 3
+
+local normalSearchDistance = 100
+local mapTalSearchDistance = 10000
+
+----------------------------------------------------------------
+-- GUI (최소화)
+----------------------------------------------------------------
+local screenGui = Instance.new("ScreenGui")
+screenGui.ResetOnSpawn = false
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 200, 0, 170)
+mainFrame.Position = UDim2.new(1, -220, 0, 60)
+mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+mainFrame.BackgroundTransparency = 0.5
+mainFrame.Parent = screenGui
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 6)
+
+local topBar = Instance.new("Frame")
+topBar.Size = UDim2.new(1, 0, 0, 24)
+topBar.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+topBar.Parent = mainFrame
+Instance.new("UICorner", topBar).CornerRadius = UDim.new(0, 6)
+
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Size = UDim2.new(0, 24, 0, 24)
+minimizeBtn.Position = UDim2.new(1, -26, 0, 0)
+minimizeBtn.BackgroundTransparency = 1
+minimizeBtn.Text = "−"
+minimizeBtn.TextColor3 = Color3.new(1,1,1)
+minimizeBtn.TextSize = 18
+minimizeBtn.Parent = topBar
+
+local content = Instance.new("Frame")
+content.Size = UDim2.new(1,0,1,-24)
+content.Position = UDim2.new(0,0,0,24)
+content.BackgroundTransparency = 1
+content.Parent = mainFrame
+
+-- Buttons
+local aimBtn = Instance.new("TextButton")
+aimBtn.Size = UDim2.new(0,180,0,36)
+aimBtn.Position = UDim2.new(0,10,0,8)
+aimBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
+aimBtn.Text = "RANDOM TRACKING"
+aimBtn.TextColor3 = Color3.new(1,1,1)
+aimBtn.Font = Enum.Font.GothamBold
+aimBtn.TextSize = 13
+aimBtn.Parent = content
+
+local maptalBtn = Instance.new("TextButton")
+maptalBtn.Size = UDim2.new(0,180,0,36)
+maptalBtn.Position = UDim2.new(0,10,0,52)
+maptalBtn.BackgroundColor3 = Color3.fromRGB(100,0,200)
+maptalBtn.Text = "맵탈"
+maptalBtn.TextColor3 = Color3.new(1,1,1)
+maptalBtn.Font = Enum.Font.GothamBold
+maptalBtn.TextSize = 13
+maptalBtn.Parent = content
+
+local silentBtn = Instance.new("TextButton")
+silentBtn.Size = UDim2.new(0,180,0,36)
+silentBtn.Position = UDim2.new(0,10,0,96)
+silentBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
+silentBtn.Text = "SILENT AIM: OFF"
+silentBtn.TextColor3 = Color3.new(1,1,1)
+silentBtn.Font = Enum.Font.GothamBold
+silentBtn.TextSize = 13
+silentBtn.Parent = content
+
+----------------------------------------------------------------
+-- 드래그
+----------------------------------------------------------------
+local dragging, dragStart, startPos
+minimizeBtn.MouseButton1Down:Connect(function(input)
+	dragging = true
+	dragStart = input.Position
+	startPos = mainFrame.Position
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+		local delta = input.Position - dragStart
+		mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = false
+	end
+end)
+
+-- 최소화
+local minimized = false
+minimizeBtn.MouseButton1Click:Connect(function()
+	minimized = not minimized
+	content.Visible = not minimized
+	mainFrame.Size = minimized and UDim2.new(0,200,0,24) or UDim2.new(0,200,0,170)
+	minimizeBtn.Text = minimized and "+" or "−"
+end)
+
+----------------------------------------------------------------
+-- Silent Aim + ESP
+----------------------------------------------------------------
+local function getNearestHead()
+	local closest, dist = nil, math.huge
+	local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if not myRoot then return nil end
+
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("Head") then
+			local d = (p.Character.HumanoidRootPart.Position - myRoot.Position).Magnitude
+			if d < dist then
+				dist = d
+				closest = p.Character.Head
+			end
+		end
+	end
+	return closest
+end
+
+UserInputService.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 and silentAimActive then
+		local head = getNearestHead()
+		if head then
+			Camera.CFrame = CFrame.new(Camera.CFrame.Position, head.Position)
+			local attackRemote = ReplicatedStorage:FindFirstChild("Remotes", true) and ReplicatedStorage.Remotes:FindFirstChild("Attack")
+			if attackRemote then
+				attackRemote:FireServer(head)
+			end
+		end
+	end
+end)
+
+-- ESP
+local function createESP(plr)
+	if plr == LocalPlayer then return end
+	local box = Drawing.new("Quad")
+	box.Thickness = 2
+	box.Color = Color3.fromRGB(0, 100, 255)
+	box.Transparency = 1
+	espList[plr] = box
+end
+
+for _, p in ipairs(Players:GetPlayers()) do createESP(p) end
+Players.PlayerAdded:Connect(createESP)
+Players.PlayerRemoving:Connect(function(p)
+	if espList[p] then espList[p]:Remove() espList[p] = nil end
+end)
+
+----------------------------------------------------------------
+-- 메인 루프 (하나로 통합 - 가볍게)
+----------------------------------------------------------------
+RunService.RenderStepped:Connect(function()
+	-- Anti Recoil
+	local cf = Camera.CFrame
+	Camera.CFrame = CFrame.new(cf.Position, cf.Position + cf.LookVector)
+
+	-- Random Tracking
+	if isLocked and lockedTarget and lockedTarget.Character then
+		local tChar = lockedTarget.Character
+		local myChar = LocalPlayer.Character
+		if tChar:FindFirstChild("Head") and myChar and myChar:FindFirstChild("HumanoidRootPart") then
+			Camera.CFrame = CFrame.new(Camera.CFrame.Position, tChar.Head.Position)
+			
+			local hrp = tChar.HumanoidRootPart
+			local backPos = hrp.Position - (hrp.CFrame.LookVector * tpDistance)
+			myChar.HumanoidRootPart.CFrame = CFrame.new(backPos, hrp.Position)
+		end
+	end
+
+	-- ESP Update
+	for plr, box in pairs(espList) do
+		if plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and plr.Character:FindFirstChild("Head") then
+			local root = Camera:WorldToViewportPoint(plr.Character.HumanoidRootPart.Position)
+			local head = Camera:WorldToViewportPoint(plr.Character.Head.Position + Vector3.new(0,0.5,0))
+			
+			if root.Z > 0 and head.Z > 0 then
+				box.PointA = Vector2.new(root.X - 15, root.Y + 25)
+				box.PointB = Vector2.new(root.X + 15, root.Y + 25)
+				box.PointC = Vector2.new(head.X + 15, head.Y - 5)
+				box.PointD = Vector2.new(head.X - 15, head.Y - 5)
+				box.Visible = true
+			else
+				box.Visible = false
+			end
+		else
+			box.Visible = false
+		end
+	end
+end)
+
+----------------------------------------------------------------
+-- 버튼 기능
+----------------------------------------------------------------
+aimBtn.MouseButton1Click:Connect(function()
+	isLocked = not isLocked
+	if isLocked then
+		lockedTarget = nil
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= LocalPlayer and p.Character then
+				lockedTarget = p
+				break
+			end
+		end
+		if lockedTarget then
+			aimBtn.Text = "TRACKING: " .. lockedTarget.DisplayName
+			aimBtn.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+		end
+	else
+		aimBtn.Text = "RANDOM TRACKING"
+		aimBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
+	end
+end)
+
+maptalBtn.MouseButton1Click:Connect(function()
+	local myChar = LocalPlayer.Character
+	local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+	if not myHrp then return end
+
+	local closest, dist = nil, math.huge
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+			local d = (p.Character.HumanoidRootPart.Position - myHrp.Position).Magnitude
+			if d < dist then dist = d closest = p end
+		end
+	end
+
+	if closest and closest.Character then
+		local tHrp = closest.Character.HumanoidRootPart
+		local backPos = tHrp.Position - (tHrp.CFrame.LookVector * tpDistance)
+		myHrp.CFrame = CFrame.new(backPos, tHrp.Position)
+		
+		maptalBtn.Text = "TELEPORTED!"
+		task.wait(0.7)
+		maptalBtn.Text = "맵탈"
+	end
+end)
+
+silentBtn.MouseButton1Click:Connect(function()
+	silentAimActive = not silentAimActive
+	if silentAimActive then
+		silentBtn.Text = "SILENT AIM: ON"
+		silentBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+	else
+		silentBtn.Text = "SILENT AIM: OFF"
+		silentBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
+	end
+end)
+
+print("Delta Light Version Loaded - Silent Aim + ESP + Tracking")
